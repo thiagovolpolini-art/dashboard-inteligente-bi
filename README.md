@@ -6,8 +6,6 @@ O projeto identifica métricas, datas, categorias, tendências, rankings e indic
 
 🚀 Demonstração
 
-Após publicar o projeto com o GitHub Pages, o site ficará disponível em um endereço semelhante a:
-
 https://thiagovolpolini-art.github.io/dashboard-inteligente-bi/
 
 ✨ Funcionalidades
