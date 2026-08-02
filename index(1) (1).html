@@ -1,0 +1,2172 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Dashboard inteligente para análise local de arquivos Excel e CSV." />
+  <title>InsightBI — Dashboard Inteligente</title>
+
+  <!-- Tecnologias obrigatórias -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <!-- Exportação para PDF -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif']
+          },
+          boxShadow: {
+            soft: '0 10px 35px rgba(15, 23, 42, .08)',
+            glow: '0 10px 40px rgba(59, 130, 246, .22)'
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    :root {
+      color-scheme: light;
+      --accent: 37 99 235;
+      --accent-2: 124 58 237;
+      --grid: rgba(148, 163, 184, .14);
+    }
+
+    html.dark {
+      color-scheme: dark;
+      --grid: rgba(148, 163, 184, .09);
+    }
+
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(148, 163, 184, .55) transparent;
+    }
+
+    *::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    *::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    *::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, .45);
+      border-radius: 999px;
+    }
+
+    body {
+      background:
+        radial-gradient(circle at 12% 10%, rgba(59, 130, 246, .10), transparent 30%),
+        radial-gradient(circle at 88% 0%, rgba(124, 58, 237, .10), transparent 28%),
+        #f8fafc;
+      min-height: 100vh;
+    }
+
+    html.dark body {
+      background:
+        radial-gradient(circle at 12% 10%, rgba(59, 130, 246, .12), transparent 30%),
+        radial-gradient(circle at 88% 0%, rgba(124, 58, 237, .10), transparent 28%),
+        #020617;
+    }
+
+    .glass {
+      background: rgba(255, 255, 255, .78);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid rgba(226, 232, 240, .9);
+    }
+
+    html.dark .glass {
+      background: rgba(15, 23, 42, .74);
+      border-color: rgba(51, 65, 85, .78);
+    }
+
+    .metric-card {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .metric-card::after {
+      content: "";
+      position: absolute;
+      width: 120px;
+      height: 120px;
+      right: -45px;
+      top: -45px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, rgba(var(--accent), .18), rgba(var(--accent-2), .08));
+      pointer-events: none;
+    }
+
+    .drop-active {
+      border-color: rgb(var(--accent)) !important;
+      background: rgba(var(--accent), .08) !important;
+      transform: scale(1.005);
+    }
+
+    .skeleton {
+      background: linear-gradient(
+        90deg,
+        rgba(148, 163, 184, .10) 25%,
+        rgba(148, 163, 184, .24) 50%,
+        rgba(148, 163, 184, .10) 75%
+      );
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
+    }
+
+    @keyframes shimmer {
+      to { background-position: -200% 0; }
+    }
+
+    .fade-in {
+      animation: fadeIn .3s ease both;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .chart-wrap {
+      position: relative;
+      min-height: 290px;
+    }
+
+    .chart-wrap canvas {
+      max-height: 330px;
+    }
+
+    .table-sticky thead th {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+
+    .toast {
+      animation: toastIn .25s ease both;
+    }
+
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(-10px) scale(.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @media print {
+      .no-print { display: none !important; }
+      body { background: white !important; }
+      .glass { box-shadow: none !important; background: white !important; }
+    }
+  </style>
+</head>
+
+<body class="font-sans text-slate-800 antialiased transition-colors duration-300 dark:text-slate-100">
+  <div id="toastContainer" class="fixed right-4 top-4 z-[100] flex w-[min(92vw,380px)] flex-col gap-3"></div>
+
+  <div class="min-h-screen">
+    <!-- Cabeçalho -->
+    <header class="no-print sticky top-0 z-40 border-b border-slate-200/80 bg-white/75 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/75">
+      <div class="mx-auto flex max-w-[1800px] items-center justify-between gap-4 px-4 py-3 lg:px-6">
+        <div class="flex min-w-0 items-center gap-3">
+          <div class="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-blue-600 to-violet-600 text-white shadow-glow">
+            <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/>
+            </svg>
+          </div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <h1 class="truncate text-base font-extrabold tracking-tight sm:text-lg">InsightBI</h1>
+              <span class="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-700 dark:bg-blue-950 dark:text-blue-300">Local</span>
+            </div>
+            <p id="fileStatus" class="truncate text-xs text-slate-500 dark:text-slate-400">Nenhum arquivo carregado</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button id="openFileBtn" class="hidden items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 sm:flex">
+            <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+            </svg>
+            Importar
+          </button>
+
+          <button id="themeToggle" aria-label="Alternar tema" class="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800">
+            <svg id="sunIcon" viewBox="0 0 24 24" class="hidden h-5 w-5" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+            </svg>
+            <svg id="moonIcon" viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.5 6.5 0 0 0 21 12.8Z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-[1800px] px-4 py-5 lg:px-6 lg:py-6">
+      <!-- Upload -->
+      <section id="uploadSection" class="fade-in">
+        <div class="glass overflow-hidden rounded-3xl shadow-soft">
+          <div class="grid lg:grid-cols-[1.15fr_.85fr]">
+            <div class="p-6 sm:p-8 lg:p-10">
+              <div class="mb-7 max-w-2xl">
+                <span class="mb-4 inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700 dark:border-blue-900 dark:bg-blue-950/70 dark:text-blue-300">
+                  <span class="h-2 w-2 rounded-full bg-blue-500"></span>
+                  Análise automática no navegador
+                </span>
+                <h2 class="text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-4xl">
+                  Transforme sua planilha em um
+                  <span class="bg-gradient-to-r from-blue-600 to-violet-600 bg-clip-text text-transparent">dashboard executivo</span>
+                </h2>
+                <p class="mt-4 max-w-xl text-sm leading-6 text-slate-600 dark:text-slate-300 sm:text-base">
+                  Importe Excel ou CSV. A aplicação identifica métricas, datas, categorias, tendências, comparativos e rankings automaticamente.
+                </p>
+              </div>
+
+              <label id="dropZone" for="fileInput" class="group flex cursor-pointer flex-col items-center justify-center rounded-3xl border-2 border-dashed border-slate-300 bg-slate-50/70 px-6 py-12 text-center transition hover:border-blue-400 hover:bg-blue-50/60 dark:border-slate-700 dark:bg-slate-900/50 dark:hover:border-blue-500 dark:hover:bg-blue-950/20">
+                <div class="mb-4 grid h-16 w-16 place-items-center rounded-2xl bg-white text-blue-600 shadow-soft transition group-hover:-translate-y-1 dark:bg-slate-800 dark:text-blue-400">
+                  <svg viewBox="0 0 24 24" class="h-8 w-8" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M5 14v5h14v-5"/>
+                  </svg>
+                </div>
+                <strong class="text-base text-slate-900 dark:text-white">Arraste o arquivo ou clique para selecionar</strong>
+                <span class="mt-2 text-sm text-slate-500 dark:text-slate-400">.xlsx, .xls ou .csv • Processamento local</span>
+                <input id="fileInput" type="file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden" />
+              </label>
+
+              <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-500 dark:text-slate-400">
+                <span class="flex items-center gap-1.5">
+                  <svg viewBox="0 0 24 24" class="h-4 w-4 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg>
+                  Seus dados não são enviados
+                </span>
+                <span class="flex items-center gap-1.5">
+                  <svg viewBox="0 0 24 24" class="h-4 w-4 text-emerald-500" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5l-8-3Z"/></svg>
+                  Leitura segura e privada
+                </span>
+              </div>
+            </div>
+
+            <div class="border-t border-slate-200 bg-gradient-to-br from-slate-950 to-blue-950 p-6 text-white dark:border-slate-800 lg:border-l lg:border-t-0 lg:p-8">
+              <div class="flex h-full flex-col">
+                <p class="text-xs font-bold uppercase tracking-[.22em] text-blue-300">Recursos inteligentes</p>
+                <h3 class="mt-3 text-2xl font-bold">Tudo pronto para explorar seus dados.</h3>
+
+                <div class="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                  <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div class="mb-3 grid h-9 w-9 place-items-center rounded-xl bg-blue-500/20 text-blue-300">
+                      <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/></svg>
+                    </div>
+                    <p class="font-semibold">KPIs automáticos</p>
+                    <p class="mt-1 text-xs leading-5 text-slate-300">Soma, média, máximo, mínimo e evolução.</p>
+                  </div>
+                  <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div class="mb-3 grid h-9 w-9 place-items-center rounded-xl bg-violet-500/20 text-violet-300">
+                      <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                    </div>
+                    <p class="font-semibold">Filtros avançados</p>
+                    <p class="mt-1 text-xs leading-5 text-slate-300">Busca, categorias, datas e intervalos.</p>
+                  </div>
+                  <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div class="mb-3 grid h-9 w-9 place-items-center rounded-xl bg-cyan-500/20 text-cyan-300">
+                      <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-7"/></svg>
+                    </div>
+                    <p class="font-semibold">Gráficos dinâmicos</p>
+                    <p class="mt-1 text-xs leading-5 text-slate-300">Tendência, ranking, distribuição e composição.</p>
+                  </div>
+                  <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div class="mb-3 grid h-9 w-9 place-items-center rounded-xl bg-emerald-500/20 text-emerald-300">
+                      <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 19h14"/></svg>
+                    </div>
+                    <p class="font-semibold">Exportação</p>
+                    <p class="mt-1 text-xs leading-5 text-slate-300">Baixe os dados filtrados em Excel ou PDF.</p>
+                  </div>
+                </div>
+
+                <div class="mt-auto pt-8 text-xs text-slate-400">
+                  Compatível com Excel e CSV. Para arquivos muito grandes, o desempenho depende da memória disponível no dispositivo.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Dashboard -->
+      <section id="dashboardSection" class="hidden fade-in">
+        <!-- Barra de ações -->
+        <div class="no-print mb-5 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div class="flex min-w-0 items-center gap-3">
+            <button id="mobileFilterBtn" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm dark:border-slate-700 dark:bg-slate-900 xl:hidden">
+              <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16M7 12h10m-7 7h4"/></svg>
+              Filtros
+            </button>
+            <div class="min-w-0">
+              <h2 id="dashboardTitle" class="truncate text-xl font-black tracking-tight text-slate-950 dark:text-white">Dashboard Executivo</h2>
+              <p id="dashboardSubtitle" class="truncate text-xs text-slate-500 dark:text-slate-400">Análise automática</p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <label class="relative min-w-[210px] flex-1 xl:flex-none">
+              <svg viewBox="0 0 24 24" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              <input id="globalSearch" type="search" placeholder="Buscar em todos os campos..." class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-900" />
+            </label>
+
+            <button id="exportExcelBtn" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800">
+              <svg viewBox="0 0 24 24" class="h-4 w-4 text-emerald-600" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16h16V8Z"/><path d="M14 2v6h6M8 13l4 4m0-4-4 4"/></svg>
+              Excel
+            </button>
+            <button id="exportPdfBtn" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800">
+              <svg viewBox="0 0 24 24" class="h-4 w-4 text-rose-600" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16h16V8Z"/><path d="M14 2v6h6M8 15h8M8 11h4"/></svg>
+              PDF
+            </button>
+            <button id="resetBtn" class="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800" title="Limpar filtros">
+              <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
+          <!-- Filtros -->
+          <aside id="filterPanel" class="no-print hidden xl:block">
+            <div class="glass sticky top-20 rounded-2xl p-4 shadow-soft">
+              <div class="mb-4 flex items-center justify-between">
+                <div>
+                  <h3 class="font-bold">Filtros</h3>
+                  <p class="text-xs text-slate-500 dark:text-slate-400">Refine toda a análise</p>
+                </div>
+                <button id="closeMobileFilters" class="grid h-8 w-8 place-items-center rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 xl:hidden">
+                  <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 6 12 12M18 6 6 18"/></svg>
+                </button>
+              </div>
+
+              <div id="sheetSelectorWrap" class="mb-4 hidden">
+                <label class="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Aba da planilha</label>
+                <select id="sheetSelector" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900"></select>
+              </div>
+
+              <div class="mb-4">
+                <label class="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Métrica principal</label>
+                <select id="metricSelector" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900"></select>
+              </div>
+
+              <div class="mb-4">
+                <label class="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Dimensão principal</label>
+                <select id="dimensionSelector" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900"></select>
+              </div>
+
+              <div id="dateFilterWrap" class="mb-4 hidden">
+                <label class="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Período</label>
+                <div class="grid grid-cols-2 gap-2">
+                  <input id="dateStart" type="date" class="min-w-0 rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900" />
+                  <input id="dateEnd" type="date" class="min-w-0 rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900" />
+                </div>
+              </div>
+
+              <div id="numericFilterWrap" class="mb-4 hidden">
+                <label class="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Intervalo da métrica</label>
+                <div class="grid grid-cols-2 gap-2">
+                  <input id="numericMin" type="number" step="any" placeholder="Mín." class="min-w-0 rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900" />
+                  <input id="numericMax" type="number" step="any" placeholder="Máx." class="min-w-0 rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-900" />
+                </div>
+              </div>
+
+              <div>
+                <div class="mb-2 flex items-center justify-between">
+                  <label class="text-xs font-bold uppercase tracking-wider text-slate-500">Categorias</label>
+                  <button id="clearCategoryFilters" class="text-[11px] font-semibold text-blue-600 hover:underline dark:text-blue-400">Limpar</button>
+                </div>
+                <div id="categoryFilters" class="max-h-[340px] space-y-3 overflow-auto pr-1"></div>
+              </div>
+
+              <div class="mt-4 rounded-xl bg-slate-100 p-3 text-xs text-slate-600 dark:bg-slate-800/80 dark:text-slate-300">
+                <div class="flex items-center justify-between gap-3">
+                  <span>Linhas exibidas</span>
+                  <strong id="filteredCount">0</strong>
+                </div>
+                <div class="mt-1 flex items-center justify-between gap-3">
+                  <span>Total original</span>
+                  <strong id="originalCount">0</strong>
+                </div>
+              </div>
+            </div>
+          </aside>
+
+          <!-- Conteúdo -->
+          <div id="dashboardCapture" class="min-w-0 space-y-5">
+            <!-- Resumo da estrutura -->
+            <div class="glass rounded-2xl p-4 shadow-soft">
+              <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div class="min-w-0">
+                  <p class="text-xs font-bold uppercase tracking-[.18em] text-blue-600 dark:text-blue-400">Diagnóstico automático</p>
+                  <p id="dataSummary" class="mt-1 text-sm text-slate-600 dark:text-slate-300"></p>
+                </div>
+                <div id="typeBadges" class="flex flex-wrap gap-2"></div>
+              </div>
+            </div>
+
+            <!-- KPIs -->
+            <div id="kpiGrid" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"></div>
+
+            <!-- Comparativo -->
+            <div id="comparisonCard" class="glass hidden rounded-2xl p-5 shadow-soft">
+              <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p class="text-xs font-bold uppercase tracking-[.18em] text-violet-600 dark:text-violet-400">Comparativo por período</p>
+                  <h3 id="comparisonTitle" class="mt-1 text-lg font-bold">Período atual x anterior</h3>
+                </div>
+                <span id="comparisonBadge" class="inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-bold"></span>
+              </div>
+              <div class="grid gap-4 md:grid-cols-3">
+                <div class="rounded-xl bg-slate-50 p-4 dark:bg-slate-900/70">
+                  <p class="text-xs text-slate-500">Período atual</p>
+                  <p id="currentPeriodValue" class="mt-1 text-2xl font-black"></p>
+                  <p id="currentPeriodLabel" class="mt-1 text-xs text-slate-500"></p>
+                </div>
+                <div class="rounded-xl bg-slate-50 p-4 dark:bg-slate-900/70">
+                  <p class="text-xs text-slate-500">Período anterior</p>
+                  <p id="previousPeriodValue" class="mt-1 text-2xl font-black"></p>
+                  <p id="previousPeriodLabel" class="mt-1 text-xs text-slate-500"></p>
+                </div>
+                <div class="rounded-xl bg-gradient-to-br from-blue-600 to-violet-600 p-4 text-white">
+                  <p class="text-xs text-blue-100">Variação</p>
+                  <p id="comparisonVariation" class="mt-1 text-2xl font-black"></p>
+                  <p class="mt-1 text-xs text-blue-100">Com base na soma da métrica</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Gráficos 1 -->
+            <div class="grid gap-5 2xl:grid-cols-2">
+              <article class="glass rounded-2xl p-4 shadow-soft sm:p-5">
+                <div class="mb-4 flex items-start justify-between gap-3">
+                  <div>
+                    <p class="text-xs font-bold uppercase tracking-[.16em] text-blue-600 dark:text-blue-400">Evolução</p>
+                    <h3 id="trendChartTitle" class="mt-1 font-bold">Tendência da métrica</h3>
+                  </div>
+                  <span id="trendGranularity" class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-300"></span>
+                </div>
+                <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+                <div id="trendEmpty" class="hidden min-h-[290px] place-items-center text-center text-sm text-slate-500">É necessária uma coluna de data e uma métrica numérica.</div>
+              </article>
+
+              <article class="glass rounded-2xl p-4 shadow-soft sm:p-5">
+                <div class="mb-4">
+                  <p class="text-xs font-bold uppercase tracking-[.16em] text-violet-600 dark:text-violet-400">Ranking</p>
+                  <h3 id="rankingChartTitle" class="mt-1 font-bold">Principais categorias</h3>
+                </div>
+                <div class="chart-wrap"><canvas id="rankingChart"></canvas></div>
+                <div id="rankingEmpty" class="hidden min-h-[290px] place-items-center text-center text-sm text-slate-500">É necessária uma dimensão categórica.</div>
+              </article>
+            </div>
+
+            <!-- Gráficos 2 -->
+            <div class="grid gap-5 lg:grid-cols-2 2xl:grid-cols-[.8fr_1.2fr]">
+              <article class="glass rounded-2xl p-4 shadow-soft sm:p-5">
+                <div class="mb-4">
+                  <p class="text-xs font-bold uppercase tracking-[.16em] text-cyan-600 dark:text-cyan-400">Composição</p>
+                  <h3 id="compositionChartTitle" class="mt-1 font-bold">Participação por categoria</h3>
+                </div>
+                <div class="chart-wrap"><canvas id="compositionChart"></canvas></div>
+                <div id="compositionEmpty" class="hidden min-h-[290px] place-items-center text-center text-sm text-slate-500">É necessária uma dimensão categórica.</div>
+              </article>
+
+              <article class="glass rounded-2xl p-4 shadow-soft sm:p-5">
+                <div class="mb-4">
+                  <p class="text-xs font-bold uppercase tracking-[.16em] text-emerald-600 dark:text-emerald-400">Distribuição</p>
+                  <h3 id="distributionChartTitle" class="mt-1 font-bold">Distribuição da métrica</h3>
+                </div>
+                <div class="chart-wrap"><canvas id="distributionChart"></canvas></div>
+                <div id="distributionEmpty" class="hidden min-h-[290px] place-items-center text-center text-sm text-slate-500">É necessária uma métrica numérica.</div>
+              </article>
+            </div>
+
+            <!-- Insights -->
+            <article class="glass rounded-2xl p-5 shadow-soft">
+              <div class="mb-4">
+                <p class="text-xs font-bold uppercase tracking-[.16em] text-amber-600 dark:text-amber-400">Insights automáticos</p>
+                <h3 class="mt-1 font-bold">Principais descobertas</h3>
+              </div>
+              <div id="insightsGrid" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+            </article>
+
+            <!-- Tabela -->
+            <article class="glass overflow-hidden rounded-2xl shadow-soft">
+              <div class="flex flex-col gap-3 border-b border-slate-200 p-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p class="text-xs font-bold uppercase tracking-[.16em] text-slate-500">Detalhamento</p>
+                  <h3 class="mt-1 font-bold">Tabela de dados</h3>
+                </div>
+                <div class="no-print flex items-center gap-2">
+                  <label class="text-xs text-slate-500">Linhas por página</label>
+                  <select id="pageSize" class="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900">
+                    <option value="10">10</option>
+                    <option value="25" selected>25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="table-sticky max-h-[620px] overflow-auto">
+                <table class="min-w-full border-separate border-spacing-0 text-left text-sm">
+                  <thead id="tableHead" class="bg-slate-100/95 text-xs uppercase tracking-wider text-slate-500 backdrop-blur dark:bg-slate-900/95 dark:text-slate-400"></thead>
+                  <tbody id="tableBody" class="divide-y divide-slate-100 dark:divide-slate-800"></tbody>
+                </table>
+              </div>
+
+              <div class="no-print flex flex-col gap-3 border-t border-slate-200 p-4 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+                <p id="pageInfo" class="text-xs text-slate-500"></p>
+                <div class="flex items-center gap-2">
+                  <button id="prevPage" class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900">Anterior</button>
+                  <div id="pageButtons" class="flex gap-1"></div>
+                  <button id="nextPage" class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900">Próxima</button>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Overlay mobile -->
+  <div id="mobileOverlay" class="no-print fixed inset-0 z-50 hidden bg-slate-950/60 backdrop-blur-sm xl:hidden"></div>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const state = {
+        workbook: null,
+        fileName: '',
+        sheetName: '',
+        rawData: [],
+        filteredData: [],
+        columns: [],
+        columnTypes: {},
+        typeScores: {},
+        numericColumns: [],
+        dateColumns: [],
+        categoricalColumns: [],
+        booleanColumns: [],
+        selectedMetric: '',
+        selectedDimension: '',
+        selectedDate: '',
+        categorySelections: {},
+        search: '',
+        page: 1,
+        pageSize: 25,
+        sort: { column: '', direction: 'asc' },
+        charts: {},
+        currencyHints: /(valor|pre[cç]o|receita|faturamento|venda|custo|lucro|sal[aá]rio|renda|total|amount|price|revenue|cost|profit)/i,
+        percentHints: /(taxa|percent|porcent|margem|convers[aã]o|share|rate|ratio|pct|%)/i
+      };
+
+      const el = id => document.getElementById(id);
+
+      const refs = {
+        fileInput: el('fileInput'),
+        openFileBtn: el('openFileBtn'),
+        dropZone: el('dropZone'),
+        uploadSection: el('uploadSection'),
+        dashboardSection: el('dashboardSection'),
+        fileStatus: el('fileStatus'),
+        dashboardTitle: el('dashboardTitle'),
+        dashboardSubtitle: el('dashboardSubtitle'),
+        sheetSelector: el('sheetSelector'),
+        sheetSelectorWrap: el('sheetSelectorWrap'),
+        metricSelector: el('metricSelector'),
+        dimensionSelector: el('dimensionSelector'),
+        dateFilterWrap: el('dateFilterWrap'),
+        dateStart: el('dateStart'),
+        dateEnd: el('dateEnd'),
+        numericFilterWrap: el('numericFilterWrap'),
+        numericMin: el('numericMin'),
+        numericMax: el('numericMax'),
+        categoryFilters: el('categoryFilters'),
+        globalSearch: el('globalSearch'),
+        filteredCount: el('filteredCount'),
+        originalCount: el('originalCount'),
+        dataSummary: el('dataSummary'),
+        typeBadges: el('typeBadges'),
+        kpiGrid: el('kpiGrid'),
+        comparisonCard: el('comparisonCard'),
+        tableHead: el('tableHead'),
+        tableBody: el('tableBody'),
+        pageInfo: el('pageInfo'),
+        pageButtons: el('pageButtons'),
+        prevPage: el('prevPage'),
+        nextPage: el('nextPage'),
+        pageSize: el('pageSize'),
+        filterPanel: el('filterPanel'),
+        mobileOverlay: el('mobileOverlay'),
+        mobileFilterBtn: el('mobileFilterBtn'),
+        closeMobileFilters: el('closeMobileFilters'),
+        insightsGrid: el('insightsGrid')
+      };
+
+      const chartPalette = [
+        '#2563eb', '#7c3aed', '#0891b2', '#059669', '#d97706',
+        '#dc2626', '#db2777', '#4f46e5', '#0d9488', '#65a30d'
+      ];
+
+      const escapeHtml = value => String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+
+      const normalizeText = value => String(value ?? '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+
+      const debounce = (fn, wait = 250) => {
+        let t;
+        return (...args) => {
+          clearTimeout(t);
+          t = setTimeout(() => fn(...args), wait);
+        };
+      };
+
+      const showToast = (message, type = 'info') => {
+        const map = {
+          info: 'border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200',
+          success: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
+          error: 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200'
+        };
+        const node = document.createElement('div');
+        node.className = `toast rounded-2xl border px-4 py-3 text-sm font-semibold shadow-soft ${map[type]}`;
+        node.textContent = message;
+        el('toastContainer').appendChild(node);
+        setTimeout(() => {
+          node.style.opacity = '0';
+          node.style.transform = 'translateY(-8px)';
+          setTimeout(() => node.remove(), 250);
+        }, 3500);
+      };
+
+      const parseLocaleNumber = value => {
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        if (value === null || value === undefined || value === '') return NaN;
+        if (typeof value === 'boolean') return NaN;
+
+        let str = String(value).trim();
+        if (!str) return NaN;
+
+        str = str.replace(/\s/g, '').replace(/[R$€£¥]/g, '').replace(/%$/, '');
+
+        const comma = str.lastIndexOf(',');
+        const dot = str.lastIndexOf('.');
+
+        if (comma > dot) {
+          str = str.replace(/\./g, '').replace(',', '.');
+        } else if (dot > comma && comma !== -1) {
+          str = str.replace(/,/g, '');
+        } else if (comma !== -1 && dot === -1) {
+          const decimals = str.length - comma - 1;
+          str = decimals === 3 && /^\-?\d{1,3}(,\d{3})+$/.test(str)
+            ? str.replace(/,/g, '')
+            : str.replace(',', '.');
+        }
+
+        str = str.replace(/[^0-9eE+\-.]/g, '');
+        const n = Number(str);
+        return Number.isFinite(n) ? n : NaN;
+      };
+
+      const isLikelyDateString = value => {
+        if (typeof value !== 'string') return false;
+        const s = value.trim();
+        if (!s || /^\d+([.,]\d+)?$/.test(s)) return false;
+
+        return [
+          /^\d{4}-\d{1,2}-\d{1,2}(?:[T\s].*)?$/,
+          /^\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}$/,
+          /^\d{1,2}\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-z]*\s+\d{2,4}$/i
+        ].some(regex => regex.test(s));
+      };
+
+      const parseDate = value => {
+        if (value instanceof Date && !isNaN(value)) return value;
+
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          if (value > 20000 && value < 80000 && XLSX?.SSF?.parse_date_code) {
+            const p = XLSX.SSF.parse_date_code(value);
+            if (p) return new Date(p.y, p.m - 1, p.d, p.H || 0, p.M || 0, Math.floor(p.S || 0));
+          }
+          return null;
+        }
+
+        if (typeof value !== 'string') return null;
+        const s = value.trim();
+        if (!s) return null;
+
+        let m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+        if (m) {
+          let year = Number(m[3]);
+          if (year < 100) year += year >= 70 ? 1900 : 2000;
+          const d = new Date(year, Number(m[2]) - 1, Number(m[1]));
+          return isNaN(d) ? null : d;
+        }
+
+        if (/^\d{4}-\d{1,2}-\d{1,2}/.test(s)) {
+          const d = new Date(s);
+          return isNaN(d) ? null : d;
+        }
+
+        if (isLikelyDateString(s)) {
+          const d = new Date(s);
+          return isNaN(d) ? null : d;
+        }
+
+        return null;
+      };
+
+      const toISODate = date => {
+        if (!(date instanceof Date) || isNaN(date)) return '';
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      };
+
+      const formatDate = value => {
+        const d = parseDate(value);
+        return d ? new Intl.DateTimeFormat('pt-BR').format(d) : String(value ?? '');
+      };
+
+      const formatNumber = (value, column = '', compact = false) => {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return '—';
+
+        const opts = compact
+          ? { notation: 'compact', maximumFractionDigits: 1 }
+          : { maximumFractionDigits: 2 };
+
+        if (state.currencyHints.test(column)) {
+          return new Intl.NumberFormat('pt-BR', {
+            style: 'currency',
+            currency: 'BRL',
+            notation: compact ? 'compact' : 'standard',
+            maximumFractionDigits: compact ? 1 : 2
+          }).format(n);
+        }
+
+        if (state.percentHints.test(column)) {
+          return `${new Intl.NumberFormat('pt-BR', opts).format(n)}%`;
+        }
+
+        return new Intl.NumberFormat('pt-BR', opts).format(n);
+      };
+
+      const safeFileName = text => String(text || 'dados')
+        .replace(/\.[^.]+$/, '')
+        .replace(/[^\w\-]+/g, '_')
+        .replace(/^_+|_+$/g, '') || 'dados';
+
+      const sum = arr => arr.reduce((acc, n) => acc + n, 0);
+      const mean = arr => arr.length ? sum(arr) / arr.length : 0;
+
+      const median = arr => {
+        if (!arr.length) return 0;
+        const sorted = [...arr].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+      };
+
+      const standardDeviation = arr => {
+        if (arr.length < 2) return 0;
+        const avg = mean(arr);
+        return Math.sqrt(mean(arr.map(n => (n - avg) ** 2)));
+      };
+
+      function setTheme(theme) {
+        const dark = theme === 'dark';
+        document.documentElement.classList.toggle('dark', dark);
+        localStorage.setItem('insightbi-theme', theme);
+        el('sunIcon').classList.toggle('hidden', !dark);
+        el('moonIcon').classList.toggle('hidden', dark);
+        refreshChartsTheme();
+      }
+
+      function refreshChartsTheme() {
+        const dark = document.documentElement.classList.contains('dark');
+        Chart.defaults.color = dark ? '#cbd5e1' : '#475569';
+        Chart.defaults.borderColor = dark ? 'rgba(148,163,184,.12)' : 'rgba(148,163,184,.18)';
+        Object.values(state.charts).forEach(chart => chart?.update('none'));
+      }
+
+      async function readFile(file) {
+        if (!file) return;
+        const ext = file.name.split('.').pop().toLowerCase();
+
+        if (!['xlsx', 'xls', 'csv'].includes(ext)) {
+          showToast('Formato não suportado. Use Excel ou CSV.', 'error');
+          return;
+        }
+
+        state.fileName = file.name;
+        refs.fileStatus.textContent = `Carregando ${file.name}...`;
+
+        try {
+          const data = await file.arrayBuffer();
+          state.workbook = XLSX.read(data, {
+            type: 'array',
+            cellDates: true,
+            raw: true,
+            dense: false
+          });
+
+          populateSheetSelector();
+          loadSheet(state.workbook.SheetNames[0]);
+          showToast('Arquivo analisado com sucesso.', 'success');
+        } catch (error) {
+          console.error(error);
+          refs.fileStatus.textContent = 'Falha ao carregar arquivo';
+          showToast('Não foi possível ler o arquivo. Verifique se ele não está corrompido.', 'error');
+        } finally {
+          refs.fileInput.value = '';
+        }
+      }
+
+      function populateSheetSelector() {
+        const names = state.workbook?.SheetNames || [];
+        refs.sheetSelector.innerHTML = names.map(name =>
+          `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`
+        ).join('');
+        refs.sheetSelectorWrap.classList.toggle('hidden', names.length <= 1);
+      }
+
+      function cleanRows(rows) {
+        return rows
+          .map(row => {
+            const out = {};
+            for (const [key, value] of Object.entries(row)) {
+              const cleanKey = String(key ?? '').trim() || 'Coluna sem nome';
+              out[cleanKey] = value;
+            }
+            return out;
+          })
+          .filter(row => Object.values(row).some(v => v !== null && v !== undefined && String(v).trim() !== ''));
+      }
+
+      function loadSheet(sheetName) {
+        const sheet = state.workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, {
+          defval: '',
+          raw: true,
+          blankrows: false
+        });
+
+        const cleaned = cleanRows(rows);
+
+        if (!cleaned.length) {
+          showToast('A aba selecionada não possui dados utilizáveis.', 'error');
+          return;
+        }
+
+        state.sheetName = sheetName;
+        state.rawData = cleaned;
+        state.page = 1;
+        state.search = '';
+        state.categorySelections = {};
+        refs.globalSearch.value = '';
+
+        analyzeData();
+        initializeSelectors();
+        initializeFilterBounds();
+        buildCategoryFilters();
+        applyFilters();
+        showDashboard();
+      }
+
+      function analyzeData() {
+        const columnSet = new Set();
+        state.rawData.forEach(row => Object.keys(row).forEach(k => columnSet.add(k)));
+        state.columns = [...columnSet];
+
+        state.columnTypes = {};
+        state.typeScores = {};
+        state.numericColumns = [];
+        state.dateColumns = [];
+        state.categoricalColumns = [];
+        state.booleanColumns = [];
+
+        const sample = state.rawData.slice(0, Math.min(500, state.rawData.length));
+
+        for (const col of state.columns) {
+          const values = sample
+            .map(r => r[col])
+            .filter(v => v !== '' && v !== null && v !== undefined);
+
+          const nonEmpty = values.length || 1;
+          let numeric = 0;
+          let date = 0;
+          let bool = 0;
+          const unique = new Set(values.map(v => normalizeText(v)));
+
+          values.forEach(v => {
+            if (!Number.isNaN(parseLocaleNumber(v))) numeric++;
+            if (parseDate(v)) date++;
+            if (
+              typeof v === 'boolean' ||
+              ['true', 'false', 'sim', 'não', 'nao', 'yes', 'no'].includes(normalizeText(v))
+            ) bool++;
+          });
+
+          const scores = {
+            numeric: numeric / nonEmpty,
+            date: date / nonEmpty,
+            boolean: bool / nonEmpty,
+            uniqueRatio: unique.size / nonEmpty,
+            uniqueCount: unique.size,
+            nonEmpty: values.length
+          };
+
+          state.typeScores[col] = scores;
+
+          let type = 'categorical';
+
+          const dateNameHint = /(data|date|dia|m[eê]s|month|ano|year|per[ií]odo|period)/i.test(col);
+          const idHint = /(^id$|c[oó]digo|codigo|code|cpf|cnpj|telefone|phone|cep|matr[ií]cula)/i.test(col);
+
+          if (scores.boolean >= 0.8) {
+            type = 'boolean';
+          } else if (scores.date >= (dateNameHint ? 0.65 : 0.88)) {
+            type = 'date';
+          } else if (scores.numeric >= 0.85 && !idHint) {
+            type = 'numeric';
+          }
+
+          state.columnTypes[col] = type;
+          if (type === 'numeric') state.numericColumns.push(col);
+          else if (type === 'date') state.dateColumns.push(col);
+          else if (type === 'boolean') state.booleanColumns.push(col);
+          else state.categoricalColumns.push(col);
+        }
+
+        state.selectedMetric = choosePrimaryMetric();
+        state.selectedDimension = choosePrimaryDimension();
+        state.selectedDate = state.dateColumns[0] || '';
+      }
+
+      function choosePrimaryMetric() {
+        if (!state.numericColumns.length) return '';
+
+        const priorities = [
+          /receita|faturamento|revenue/i,
+          /vendas?|sales?/i,
+          /valor|amount/i,
+          /lucro|profit/i,
+          /quantidade|qtd|quantity|volume/i,
+          /total/i
+        ];
+
+        for (const regex of priorities) {
+          const found = state.numericColumns.find(col => regex.test(col));
+          if (found) return found;
+        }
+
+        return state.numericColumns
+          .map(col => ({
+            col,
+            variance: standardDeviation(
+              state.rawData.map(r => parseLocaleNumber(r[col])).filter(Number.isFinite)
+            )
+          }))
+          .sort((a, b) => b.variance - a.variance)[0]?.col || state.numericColumns[0];
+      }
+
+      function choosePrimaryDimension() {
+        const candidates = state.categoricalColumns.filter(col => {
+          const s = state.typeScores[col];
+          return s.uniqueCount >= 2 && s.uniqueCount <= Math.min(100, state.rawData.length * .6);
+        });
+
+        const priorities = [
+          /categoria|category|segmento|segment/i,
+          /produto|product|servi[cç]o|service/i,
+          /regi[aã]o|region|estado|state|cidade|city/i,
+          /cliente|customer/i,
+          /status|situa[cç][aã]o/i,
+          /canal|channel/i,
+          /vendedor|seller|respons[aá]vel|owner/i
+        ];
+
+        for (const regex of priorities) {
+          const found = candidates.find(col => regex.test(col));
+          if (found) return found;
+        }
+
+        return candidates.sort((a, b) =>
+          state.typeScores[b].uniqueCount - state.typeScores[a].uniqueCount
+        )[0] || state.categoricalColumns[0] || state.booleanColumns[0] || '';
+      }
+
+      function initializeSelectors() {
+        refs.metricSelector.innerHTML = state.numericColumns.length
+          ? state.numericColumns.map(col =>
+              `<option value="${escapeHtml(col)}"${col === state.selectedMetric ? ' selected' : ''}>${escapeHtml(col)}</option>`
+            ).join('')
+          : '<option value="">Contagem de registros</option>';
+
+        const dimensions = [...state.categoricalColumns, ...state.booleanColumns];
+        refs.dimensionSelector.innerHTML = dimensions.length
+          ? dimensions.map(col =>
+              `<option value="${escapeHtml(col)}"${col === state.selectedDimension ? ' selected' : ''}>${escapeHtml(col)}</option>`
+            ).join('')
+          : '<option value="">Sem dimensão categórica</option>';
+      }
+
+      function initializeFilterBounds() {
+        refs.dateStart.value = '';
+        refs.dateEnd.value = '';
+        refs.numericMin.value = '';
+        refs.numericMax.value = '';
+
+        refs.dateFilterWrap.classList.toggle('hidden', !state.selectedDate);
+        refs.numericFilterWrap.classList.toggle('hidden', !state.selectedMetric);
+
+        if (state.selectedDate) {
+          const dates = state.rawData
+            .map(r => parseDate(r[state.selectedDate]))
+            .filter(Boolean)
+            .sort((a, b) => a - b);
+
+          if (dates.length) {
+            refs.dateStart.min = toISODate(dates[0]);
+            refs.dateStart.max = toISODate(dates.at(-1));
+            refs.dateEnd.min = toISODate(dates[0]);
+            refs.dateEnd.max = toISODate(dates.at(-1));
+          }
+        }
+
+        if (state.selectedMetric) {
+          const nums = state.rawData
+            .map(r => parseLocaleNumber(r[state.selectedMetric]))
+            .filter(Number.isFinite);
+          if (nums.length) {
+            refs.numericMin.placeholder = `Mín. ${formatNumber(Math.min(...nums), state.selectedMetric)}`;
+            refs.numericMax.placeholder = `Máx. ${formatNumber(Math.max(...nums), state.selectedMetric)}`;
+          }
+        }
+      }
+
+      function buildCategoryFilters() {
+        const candidates = [...state.categoricalColumns, ...state.booleanColumns]
+          .filter(col => state.typeScores[col].uniqueCount >= 2 && state.typeScores[col].uniqueCount <= 30)
+          .slice(0, 6);
+
+        refs.categoryFilters.innerHTML = '';
+
+        if (!candidates.length) {
+          refs.categoryFilters.innerHTML = '<p class="rounded-xl bg-slate-100 p-3 text-xs text-slate-500 dark:bg-slate-800">Nenhuma categoria adequada para filtro automático.</p>';
+          return;
+        }
+
+        candidates.forEach(col => {
+          const counts = new Map();
+          state.rawData.forEach(row => {
+            const key = String(row[col] ?? '').trim() || '(Vazio)';
+            counts.set(key, (counts.get(key) || 0) + 1);
+          });
+
+          const values = [...counts.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 15);
+
+          state.categorySelections[col] = new Set();
+
+          const wrapper = document.createElement('details');
+          wrapper.className = 'group rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900';
+          wrapper.open = col === state.selectedDimension;
+          wrapper.innerHTML = `
+            <summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-xs font-semibold">
+              <span class="truncate">${escapeHtml(col)}</span>
+              <span class="flex items-center gap-2">
+                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500 dark:bg-slate-800">${values.length}</span>
+                <svg viewBox="0 0 24 24" class="h-3.5 w-3.5 transition group-open:rotate-180" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+              </span>
+            </summary>
+            <div class="max-h-48 space-y-1 overflow-auto border-t border-slate-100 p-2 dark:border-slate-800">
+              ${values.map(([value, count], idx) => `
+                <label class="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-slate-50 dark:hover:bg-slate-800">
+                  <input type="checkbox" data-filter-column="${escapeHtml(col)}" data-filter-value="${escapeHtml(value)}" class="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                  <span class="min-w-0 flex-1 truncate">${escapeHtml(value)}</span>
+                  <span class="text-[10px] text-slate-400">${count}</span>
+                </label>
+              `).join('')}
+            </div>
+          `;
+
+          refs.categoryFilters.appendChild(wrapper);
+        });
+
+        refs.categoryFilters.querySelectorAll('input[type="checkbox"]').forEach(input => {
+          input.addEventListener('change', event => {
+            const col = event.target.dataset.filterColumn;
+            const value = event.target.dataset.filterValue;
+            const set = state.categorySelections[col] || new Set();
+
+            if (event.target.checked) set.add(value);
+            else set.delete(value);
+
+            state.categorySelections[col] = set;
+            state.page = 1;
+            applyFilters();
+          });
+        });
+      }
+
+      function applyFilters() {
+        const search = normalizeText(refs.globalSearch.value);
+        const start = refs.dateStart.value ? new Date(`${refs.dateStart.value}T00:00:00`) : null;
+        const end = refs.dateEnd.value ? new Date(`${refs.dateEnd.value}T23:59:59`) : null;
+        const min = refs.numericMin.value !== '' ? Number(refs.numericMin.value) : null;
+        const max = refs.numericMax.value !== '' ? Number(refs.numericMax.value) : null;
+
+        state.filteredData = state.rawData.filter(row => {
+          if (search) {
+            const found = state.columns.some(col => normalizeText(row[col]).includes(search));
+            if (!found) return false;
+          }
+
+          if (state.selectedDate && (start || end)) {
+            const d = parseDate(row[state.selectedDate]);
+            if (!d) return false;
+            if (start && d < start) return false;
+            if (end && d > end) return false;
+          }
+
+          if (state.selectedMetric && (min !== null || max !== null)) {
+            const n = parseLocaleNumber(row[state.selectedMetric]);
+            if (!Number.isFinite(n)) return false;
+            if (min !== null && n < min) return false;
+            if (max !== null && n > max) return false;
+          }
+
+          for (const [col, selected] of Object.entries(state.categorySelections)) {
+            if (!selected.size) continue;
+            const value = String(row[col] ?? '').trim() || '(Vazio)';
+            if (!selected.has(value)) return false;
+          }
+
+          return true;
+        });
+
+        refs.filteredCount.textContent = state.filteredData.length.toLocaleString('pt-BR');
+        refs.originalCount.textContent = state.rawData.length.toLocaleString('pt-BR');
+
+        const maxPage = Math.max(1, Math.ceil(state.filteredData.length / state.pageSize));
+        if (state.page > maxPage) state.page = maxPage;
+
+        updateDashboard();
+      }
+
+      function showDashboard() {
+        refs.uploadSection.classList.add('hidden');
+        refs.dashboardSection.classList.remove('hidden');
+        refs.openFileBtn.classList.remove('hidden');
+        refs.openFileBtn.classList.add('sm:flex');
+        refs.fileStatus.textContent = `${state.fileName} • ${state.sheetName}`;
+        refs.dashboardTitle.textContent = safeFileName(state.fileName).replaceAll('_', ' ');
+        refs.dashboardSubtitle.textContent = `${state.sheetName} • ${state.rawData.length.toLocaleString('pt-BR')} registros • ${state.columns.length} colunas`;
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+
+      function updateDashboard() {
+        updateStructureSummary();
+        updateKPIs();
+        updateComparison();
+        updateCharts();
+        updateInsights();
+        updateTable();
+      }
+
+      function updateStructureSummary() {
+        refs.dataSummary.textContent = state.filteredData.length
+          ? `Foram identificadas ${state.numericColumns.length} métricas numéricas, ${state.dateColumns.length} colunas de data e ${state.categoricalColumns.length + state.booleanColumns.length} dimensões categóricas.`
+          : 'Nenhum registro corresponde aos filtros atuais.';
+
+        const badges = [
+          ['Registros', state.filteredData.length, 'blue'],
+          ['Métricas', state.numericColumns.length, 'emerald'],
+          ['Datas', state.dateColumns.length, 'violet'],
+          ['Categorias', state.categoricalColumns.length + state.booleanColumns.length, 'amber']
+        ];
+
+        const styles = {
+          blue: 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
+          emerald: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
+          violet: 'bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-300',
+          amber: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+        };
+
+        refs.typeBadges.innerHTML = badges.map(([label, value, color]) =>
+          `<span class="rounded-full px-3 py-1 text-xs font-bold ${styles[color]}">${escapeHtml(label)}: ${Number(value).toLocaleString('pt-BR')}</span>`
+        ).join('');
+      }
+
+      function numericValues(column, data = state.filteredData) {
+        return data.map(row => parseLocaleNumber(row[column])).filter(Number.isFinite);
+      }
+
+      function updateKPIs() {
+        const data = state.filteredData;
+        const metric = state.selectedMetric;
+        const nums = metric ? numericValues(metric, data) : [];
+
+        const kpis = metric && nums.length
+          ? [
+              {
+                label: `Total de ${metric}`,
+                value: formatNumber(sum(nums), metric, true),
+                full: formatNumber(sum(nums), metric),
+                icon: 'Σ',
+                note: `${nums.length.toLocaleString('pt-BR')} valores válidos`
+              },
+              {
+                label: `Média de ${metric}`,
+                value: formatNumber(mean(nums), metric, true),
+                full: formatNumber(mean(nums), metric),
+                icon: 'μ',
+                note: `Mediana: ${formatNumber(median(nums), metric)}`
+              },
+              {
+                label: `Maior ${metric}`,
+                value: formatNumber(Math.max(...nums), metric, true),
+                full: formatNumber(Math.max(...nums), metric),
+                icon: '↑',
+                note: `Mínimo: ${formatNumber(Math.min(...nums), metric)}`
+              },
+              {
+                label: 'Registros analisados',
+                value: data.length.toLocaleString('pt-BR'),
+                full: data.length.toLocaleString('pt-BR'),
+                icon: '#',
+                note: `${((data.length / Math.max(1, state.rawData.length)) * 100).toFixed(1)}% do total`
+              }
+            ]
+          : [
+              {
+                label: 'Registros analisados',
+                value: data.length.toLocaleString('pt-BR'),
+                full: data.length.toLocaleString('pt-BR'),
+                icon: '#',
+                note: `${state.rawData.length.toLocaleString('pt-BR')} registros originais`
+              },
+              {
+                label: 'Colunas',
+                value: state.columns.length.toLocaleString('pt-BR'),
+                full: state.columns.length.toLocaleString('pt-BR'),
+                icon: '▦',
+                note: 'Estrutura identificada'
+              },
+              {
+                label: 'Categorias',
+                value: (state.categoricalColumns.length + state.booleanColumns.length).toLocaleString('pt-BR'),
+                full: (state.categoricalColumns.length + state.booleanColumns.length).toLocaleString('pt-BR'),
+                icon: '◫',
+                note: 'Dimensões disponíveis'
+              },
+              {
+                label: 'Datas',
+                value: state.dateColumns.length.toLocaleString('pt-BR'),
+                full: state.dateColumns.length.toLocaleString('pt-BR'),
+                icon: '◷',
+                note: 'Colunas temporais'
+              }
+            ];
+
+        refs.kpiGrid.innerHTML = kpis.map((kpi, idx) => `
+          <article class="metric-card glass rounded-2xl p-5 shadow-soft">
+            <div class="relative z-10">
+              <div class="mb-4 flex items-start justify-between gap-3">
+                <p class="max-w-[80%] truncate text-xs font-bold uppercase tracking-[.13em] text-slate-500" title="${escapeHtml(kpi.label)}">${escapeHtml(kpi.label)}</p>
+                <span class="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-blue-50 text-sm font-black text-blue-600 dark:bg-blue-950 dark:text-blue-300">${escapeHtml(kpi.icon)}</span>
+              </div>
+              <p class="truncate text-3xl font-black tracking-tight text-slate-950 dark:text-white" title="${escapeHtml(kpi.full)}">${escapeHtml(kpi.value)}</p>
+              <p class="mt-2 truncate text-xs text-slate-500 dark:text-slate-400" title="${escapeHtml(kpi.note)}">${escapeHtml(kpi.note)}</p>
+            </div>
+          </article>
+        `).join('');
+      }
+
+      function getPeriodComparison() {
+        if (!state.selectedDate || !state.selectedMetric) return null;
+
+        const rows = state.filteredData
+          .map(row => ({
+            date: parseDate(row[state.selectedDate]),
+            value: parseLocaleNumber(row[state.selectedMetric])
+          }))
+          .filter(item => item.date && Number.isFinite(item.value))
+          .sort((a, b) => a.date - b.date);
+
+        if (rows.length < 2) return null;
+
+        const minDate = rows[0].date;
+        const maxDate = rows.at(-1).date;
+        const spanDays = Math.max(1, (maxDate - minDate) / 86400000);
+
+        let granularity;
+        if (spanDays > 730) granularity = 'year';
+        else if (spanDays > 90) granularity = 'month';
+        else if (spanDays > 14) granularity = 'week';
+        else granularity = 'day';
+
+        const periodKey = date => {
+          if (granularity === 'year') return `${date.getFullYear()}`;
+          if (granularity === 'month') return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+          if (granularity === 'week') {
+            const first = new Date(date.getFullYear(), 0, 1);
+            const day = Math.floor((date - first) / 86400000);
+            const week = Math.ceil((day + first.getDay() + 1) / 7);
+            return `${date.getFullYear()}-S${String(week).padStart(2, '0')}`;
+          }
+          return toISODate(date);
+        };
+
+        const groups = new Map();
+        rows.forEach(item => {
+          const key = periodKey(item.date);
+          groups.set(key, (groups.get(key) || 0) + item.value);
+        });
+
+        const entries = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+        if (entries.length < 2) return null;
+
+        const [currentLabel, current] = entries.at(-1);
+        const [previousLabel, previous] = entries.at(-2);
+        const variation = previous === 0 ? null : ((current - previous) / Math.abs(previous)) * 100;
+
+        return { currentLabel, current, previousLabel, previous, variation, granularity };
+      }
+
+      function updateComparison() {
+        const comparison = getPeriodComparison();
+
+        if (!comparison) {
+          refs.comparisonCard.classList.add('hidden');
+          return;
+        }
+
+        refs.comparisonCard.classList.remove('hidden');
+        el('comparisonTitle').textContent = `${state.selectedMetric}: período atual x anterior`;
+        el('currentPeriodValue').textContent = formatNumber(comparison.current, state.selectedMetric);
+        el('previousPeriodValue').textContent = formatNumber(comparison.previous, state.selectedMetric);
+        el('currentPeriodLabel').textContent = comparison.currentLabel;
+        el('previousPeriodLabel').textContent = comparison.previousLabel;
+        el('comparisonVariation').textContent = comparison.variation === null
+          ? 'Sem base'
+          : `${comparison.variation >= 0 ? '+' : ''}${comparison.variation.toFixed(1)}%`;
+
+        const badge = el('comparisonBadge');
+        const positive = comparison.variation !== null && comparison.variation >= 0;
+        badge.textContent = comparison.variation === null
+          ? 'Comparação indisponível'
+          : positive ? 'Crescimento' : 'Queda';
+        badge.className = `inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-bold ${
+          comparison.variation === null
+            ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+            : positive
+              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+              : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+        }`;
+      }
+
+      function destroyChart(name) {
+        if (state.charts[name]) {
+          state.charts[name].destroy();
+          state.charts[name] = null;
+        }
+      }
+
+      function chartBaseOptions() {
+        return {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 450 },
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: {
+              labels: {
+                usePointStyle: true,
+                boxWidth: 8,
+                padding: 16,
+                font: { size: 11, weight: '600' }
+              }
+            },
+            tooltip: {
+              backgroundColor: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+              titleColor: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#0f172a',
+              bodyColor: document.documentElement.classList.contains('dark') ? '#cbd5e1' : '#475569',
+              borderColor: document.documentElement.classList.contains('dark') ? '#334155' : '#e2e8f0',
+              borderWidth: 1,
+              padding: 12,
+              cornerRadius: 12,
+              displayColors: true
+            }
+          }
+        };
+      }
+
+      function aggregateByDate(data, dateCol, metricCol) {
+        const rows = data
+          .map(row => ({
+            date: parseDate(row[dateCol]),
+            value: metricCol ? parseLocaleNumber(row[metricCol]) : 1
+          }))
+          .filter(item => item.date && Number.isFinite(item.value))
+          .sort((a, b) => a.date - b.date);
+
+        if (!rows.length) return { labels: [], values: [], granularity: '' };
+
+        const spanDays = Math.max(1, (rows.at(-1).date - rows[0].date) / 86400000);
+        let granularity;
+        if (spanDays > 730) granularity = 'Ano';
+        else if (spanDays > 90) granularity = 'Mês';
+        else if (spanDays > 21) granularity = 'Semana';
+        else granularity = 'Dia';
+
+        const groupKey = date => {
+          if (granularity === 'Ano') return `${date.getFullYear()}`;
+          if (granularity === 'Mês') return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+          if (granularity === 'Semana') {
+            const start = new Date(date);
+            start.setDate(date.getDate() - date.getDay());
+            return toISODate(start);
+          }
+          return toISODate(date);
+        };
+
+        const groups = new Map();
+        rows.forEach(item => {
+          const key = groupKey(item.date);
+          groups.set(key, (groups.get(key) || 0) + item.value);
+        });
+
+        const entries = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+        return {
+          labels: entries.map(([key]) => key),
+          values: entries.map(([, value]) => value),
+          granularity
+        };
+      }
+
+      function aggregateByCategory(data, dimension, metric, limit = 10) {
+        if (!dimension) return [];
+        const groups = new Map();
+
+        data.forEach(row => {
+          const key = String(row[dimension] ?? '').trim() || '(Vazio)';
+          const value = metric ? parseLocaleNumber(row[metric]) : 1;
+          if (metric && !Number.isFinite(value)) return;
+          groups.set(key, (groups.get(key) || 0) + (metric ? value : 1));
+        });
+
+        return [...groups.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, limit);
+      }
+
+      function updateCharts() {
+        updateTrendChart();
+        updateRankingChart();
+        updateCompositionChart();
+        updateDistributionChart();
+      }
+
+      function updateTrendChart() {
+        destroyChart('trend');
+        const canvas = el('trendChart');
+        const empty = el('trendEmpty');
+
+        if (!state.selectedDate || !state.selectedMetric || !state.filteredData.length) {
+          canvas.classList.add('hidden');
+          empty.classList.remove('hidden');
+          empty.classList.add('grid');
+          return;
+        }
+
+        const agg = aggregateByDate(state.filteredData, state.selectedDate, state.selectedMetric);
+        if (!agg.labels.length) {
+          canvas.classList.add('hidden');
+          empty.classList.remove('hidden');
+          empty.classList.add('grid');
+          return;
+        }
+
+        canvas.classList.remove('hidden');
+        empty.classList.add('hidden');
+        empty.classList.remove('grid');
+
+        el('trendChartTitle').textContent = `${state.selectedMetric} por ${state.selectedDate}`;
+        el('trendGranularity').textContent = agg.granularity;
+
+        const options = chartBaseOptions();
+        options.scales = {
+          x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
+          y: {
+            beginAtZero: false,
+            grid: { color: getComputedStyle(document.documentElement).getPropertyValue('--grid') },
+            ticks: { callback: value => formatNumber(value, state.selectedMetric, true) }
+          }
+        };
+        options.plugins.legend.display = false;
+        options.plugins.tooltip.callbacks = {
+          label: ctx => `${state.selectedMetric}: ${formatNumber(ctx.parsed.y, state.selectedMetric)}`
+        };
+
+        state.charts.trend = new Chart(canvas, {
+          type: 'line',
+          data: {
+            labels: agg.labels,
+            datasets: [{
+              label: state.selectedMetric,
+              data: agg.values,
+              borderColor: '#2563eb',
+              backgroundColor: 'rgba(37, 99, 235, .14)',
+              borderWidth: 2.5,
+              pointRadius: agg.labels.length > 30 ? 0 : 3,
+              pointHoverRadius: 5,
+              tension: .32,
+              fill: true
+            }]
+          },
+          options
+        });
+      }
+
+      function updateRankingChart() {
+        destroyChart('ranking');
+        const canvas = el('rankingChart');
+        const empty = el('rankingEmpty');
+
+        const entries = aggregateByCategory(state.filteredData, state.selectedDimension, state.selectedMetric, 10);
+
+        if (!entries.length) {
+          canvas.classList.add('hidden');
+          empty.classList.remove('hidden');
+          empty.classList.add('grid');
+          return;
+        }
+
+        canvas.classList.remove('hidden');
+        empty.classList.add('hidden');
+        empty.classList.remove('grid');
+
+        el('rankingChartTitle').textContent = `${state.selectedDimension} por ${state.selectedMetric || 'registros'}`;
+
+        const options = chartBaseOptions();
+        options.indexAxis = 'y';
+        options.plugins.legend.display = false;
+        options.scales = {
+          x: {
+            beginAtZero: true,
+            grid: { color: getComputedStyle(document.documentElement).getPropertyValue('--grid') },
+            ticks: { callback: value => state.selectedMetric ? formatNumber(value, state.selectedMetric, true) : value }
+          },
+          y: { grid: { display: false }, ticks: { autoSkip: false } }
+        };
+        options.plugins.tooltip.callbacks = {
+          label: ctx => state.selectedMetric
+            ? formatNumber(ctx.parsed.x, state.selectedMetric)
+            : `${ctx.parsed.x.toLocaleString('pt-BR')} registros`
+        };
+
+        state.charts.ranking = new Chart(canvas, {
+          type: 'bar',
+          data: {
+            labels: entries.map(([label]) => label),
+            datasets: [{
+              data: entries.map(([, value]) => value),
+              backgroundColor: entries.map((_, i) => chartPalette[i % chartPalette.length]),
+              borderRadius: 7,
+              borderSkipped: false
+            }]
+          },
+          options
+        });
+      }
+
+      function updateCompositionChart() {
+        destroyChart('composition');
+        const canvas = el('compositionChart');
+        const empty = el('compositionEmpty');
+        const entries = aggregateByCategory(state.filteredData, state.selectedDimension, state.selectedMetric, 7);
+
+        if (!entries.length) {
+          canvas.classList.add('hidden');
+          empty.classList.remove('hidden');
+          empty.classList.add('grid');
+          return;
+        }
+
+        canvas.classList.remove('hidden');
+        empty.classList.add('hidden');
+        empty.classList.remove('grid');
+
+        el('compositionChartTitle').textContent = `Participação de ${state.selectedDimension}`;
+
+        const options = chartBaseOptions();
+        options.cutout = '65%';
+        options.plugins.legend.position = 'bottom';
+        options.plugins.tooltip.callbacks = {
+          label: ctx => {
+            const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+            const pct = total ? (ctx.parsed / total) * 100 : 0;
+            const value = state.selectedMetric
+              ? formatNumber(ctx.parsed, state.selectedMetric)
+              : `${ctx.parsed.toLocaleString('pt-BR')} registros`;
+            return `${ctx.label}: ${value} (${pct.toFixed(1)}%)`;
+          }
+        };
+
+        state.charts.composition = new Chart(canvas, {
+          type: 'doughnut',
+          data: {
+            labels: entries.map(([label]) => label),
+            datasets: [{
+              data: entries.map(([, value]) => value),
+              backgroundColor: entries.map((_, i) => chartPalette[i % chartPalette.length]),
+              borderWidth: 0,
+              hoverOffset: 8
+            }]
+          },
+          options
+        });
+      }
+
+      function makeHistogram(values, bins = 10) {
+        if (!values.length) return { labels: [], counts: [] };
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+
+        if (min === max) {
+          return { labels: [formatNumber(min, state.selectedMetric)], counts: [values.length] };
+        }
+
+        const width = (max - min) / bins;
+        const counts = Array(bins).fill(0);
+        const labels = Array.from({ length: bins }, (_, i) => {
+          const a = min + i * width;
+          const b = i === bins - 1 ? max : min + (i + 1) * width;
+          return `${formatNumber(a, state.selectedMetric, true)}–${formatNumber(b, state.selectedMetric, true)}`;
+        });
+
+        values.forEach(value => {
+          const index = Math.min(bins - 1, Math.floor((value - min) / width));
+          counts[index]++;
+        });
+
+        return { labels, counts };
+      }
+
+      function updateDistributionChart() {
+        destroyChart('distribution');
+        const canvas = el('distributionChart');
+        const empty = el('distributionEmpty');
+        const values = state.selectedMetric ? numericValues(state.selectedMetric) : [];
+
+        if (!values.length) {
+          canvas.classList.add('hidden');
+          empty.classList.remove('hidden');
+          empty.classList.add('grid');
+          return;
+        }
+
+        canvas.classList.remove('hidden');
+        empty.classList.add('hidden');
+        empty.classList.remove('grid');
+
+        el('distributionChartTitle').textContent = `Distribuição de ${state.selectedMetric}`;
+        const hist = makeHistogram(values, Math.min(12, Math.max(5, Math.ceil(Math.sqrt(values.length)))));
+
+        const options = chartBaseOptions();
+        options.plugins.legend.display = false;
+        options.scales = {
+          x: { grid: { display: false }, ticks: { maxRotation: 45, minRotation: 0 } },
+          y: {
+            beginAtZero: true,
+            grid: { color: getComputedStyle(document.documentElement).getPropertyValue('--grid') },
+            ticks: { precision: 0 }
+          }
+        };
+        options.plugins.tooltip.callbacks = {
+          label: ctx => `${ctx.parsed.y.toLocaleString('pt-BR')} registros`
+        };
+
+        state.charts.distribution = new Chart(canvas, {
+          type: 'bar',
+          data: {
+            labels: hist.labels,
+            datasets: [{
+              data: hist.counts,
+              backgroundColor: 'rgba(5, 150, 105, .78)',
+              borderRadius: 6,
+              borderSkipped: false
+            }]
+          },
+          options
+        });
+      }
+
+      function updateInsights() {
+        const insights = [];
+        const data = state.filteredData;
+
+        if (!data.length) {
+          refs.insightsGrid.innerHTML = '<p class="col-span-full rounded-xl bg-slate-100 p-4 text-sm text-slate-500 dark:bg-slate-800">Ajuste os filtros para voltar a exibir dados.</p>';
+          return;
+        }
+
+        if (state.selectedMetric) {
+          const nums = numericValues(state.selectedMetric);
+          if (nums.length) {
+            const total = sum(nums);
+            const avg = mean(nums);
+            const sd = standardDeviation(nums);
+            const cv = avg === 0 ? 0 : Math.abs(sd / avg) * 100;
+
+            insights.push({
+              icon: '∑',
+              title: 'Volume total',
+              text: `${state.selectedMetric} soma ${formatNumber(total, state.selectedMetric)} nos registros filtrados.`
+            });
+
+            insights.push({
+              icon: 'σ',
+              title: 'Dispersão',
+              text: `A variação relativa da métrica é de ${cv.toFixed(1)}%, indicando ${cv < 20 ? 'alta estabilidade' : cv < 50 ? 'dispersão moderada' : 'forte dispersão'}.`
+            });
+          }
+        }
+
+        if (state.selectedDimension) {
+          const rank = aggregateByCategory(data, state.selectedDimension, state.selectedMetric, 5);
+          if (rank.length) {
+            const totalRank = rank.reduce((acc, [, value]) => acc + value, 0);
+            const leaderShare = totalRank ? (rank[0][1] / totalRank) * 100 : 0;
+            insights.push({
+              icon: '★',
+              title: 'Líder do ranking',
+              text: `${rank[0][0]} ocupa a primeira posição com ${state.selectedMetric ? formatNumber(rank[0][1], state.selectedMetric) : rank[0][1].toLocaleString('pt-BR')}.`
+            });
+            insights.push({
+              icon: '%',
+              title: 'Concentração',
+              text: `O principal item representa ${leaderShare.toFixed(1)}% do total entre as cinco maiores categorias.`
+            });
+          }
+        }
+
+        const comparison = getPeriodComparison();
+        if (comparison && comparison.variation !== null) {
+          insights.push({
+            icon: comparison.variation >= 0 ? '↗' : '↘',
+            title: 'Evolução recente',
+            text: `O período mais recente apresentou ${Math.abs(comparison.variation).toFixed(1)}% de ${comparison.variation >= 0 ? 'crescimento' : 'queda'} em relação ao anterior.`
+          });
+        }
+
+        const completeness = state.columns.map(col => {
+          const filled = data.filter(row => row[col] !== '' && row[col] !== null && row[col] !== undefined).length;
+          return { col, pct: data.length ? (filled / data.length) * 100 : 0 };
+        }).sort((a, b) => a.pct - b.pct);
+
+        if (completeness.length && completeness[0].pct < 100) {
+          insights.push({
+            icon: '!',
+            title: 'Qualidade dos dados',
+            text: `${completeness[0].col} possui ${completeness[0].pct.toFixed(1)}% de preenchimento e merece atenção.`
+          });
+        } else {
+          insights.push({
+            icon: '✓',
+            title: 'Qualidade dos dados',
+            text: 'As colunas analisadas apresentam bom nível de preenchimento no recorte atual.'
+          });
+        }
+
+        refs.insightsGrid.innerHTML = insights.slice(0, 6).map(item => `
+          <div class="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+            <div class="mb-3 grid h-9 w-9 place-items-center rounded-xl bg-amber-50 font-black text-amber-600 dark:bg-amber-950 dark:text-amber-300">${escapeHtml(item.icon)}</div>
+            <h4 class="text-sm font-bold">${escapeHtml(item.title)}</h4>
+            <p class="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">${escapeHtml(item.text)}</p>
+          </div>
+        `).join('');
+      }
+
+      function getSortedData() {
+        const data = [...state.filteredData];
+        const { column, direction } = state.sort;
+        if (!column) return data;
+
+        const type = state.columnTypes[column];
+
+        return data.sort((a, b) => {
+          let av = a[column], bv = b[column];
+
+          if (type === 'numeric') {
+            av = parseLocaleNumber(av);
+            bv = parseLocaleNumber(bv);
+          } else if (type === 'date') {
+            av = parseDate(av)?.getTime() ?? -Infinity;
+            bv = parseDate(bv)?.getTime() ?? -Infinity;
+          } else {
+            av = normalizeText(av);
+            bv = normalizeText(bv);
+          }
+
+          if (av < bv) return direction === 'asc' ? -1 : 1;
+          if (av > bv) return direction === 'asc' ? 1 : -1;
+          return 0;
+        });
+      }
+
+      function updateTable() {
+        const sorted = getSortedData();
+        const totalPages = Math.max(1, Math.ceil(sorted.length / state.pageSize));
+        state.page = Math.min(state.page, totalPages);
+
+        const startIndex = (state.page - 1) * state.pageSize;
+        const pageRows = sorted.slice(startIndex, startIndex + state.pageSize);
+
+        refs.tableHead.innerHTML = `
+          <tr>
+            ${state.columns.map(col => {
+              const active = state.sort.column === col;
+              const arrow = active ? (state.sort.direction === 'asc' ? '↑' : '↓') : '↕';
+              return `
+                <th class="whitespace-nowrap border-b border-slate-200 px-4 py-3 font-bold dark:border-slate-800">
+                  <button data-sort-column="${escapeHtml(col)}" class="flex items-center gap-2 hover:text-blue-600 dark:hover:text-blue-400">
+                    <span>${escapeHtml(col)}</span>
+                    <span class="${active ? 'text-blue-600 dark:text-blue-400' : 'text-slate-300 dark:text-slate-600'}">${arrow}</span>
+                  </button>
+                </th>
+              `;
+            }).join('')}
+          </tr>
+        `;
+
+        refs.tableBody.innerHTML = pageRows.length
+          ? pageRows.map(row => `
+              <tr class="transition hover:bg-blue-50/50 dark:hover:bg-blue-950/20">
+                ${state.columns.map(col => {
+                  const value = row[col];
+                  const type = state.columnTypes[col];
+                  const display = type === 'numeric'
+                    ? formatNumber(parseLocaleNumber(value), col)
+                    : type === 'date'
+                      ? formatDate(value)
+                      : String(value ?? '');
+
+                  return `<td class="max-w-[320px] truncate whitespace-nowrap px-4 py-3 text-slate-600 dark:text-slate-300" title="${escapeHtml(display)}">${escapeHtml(display || '—')}</td>`;
+                }).join('')}
+              </tr>
+            `).join('')
+          : `<tr><td colspan="${state.columns.length}" class="px-4 py-16 text-center text-sm text-slate-500">Nenhum registro encontrado.</td></tr>`;
+
+        refs.tableHead.querySelectorAll('[data-sort-column]').forEach(button => {
+          button.addEventListener('click', () => {
+            const col = button.dataset.sortColumn;
+            if (state.sort.column === col) {
+              state.sort.direction = state.sort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+              state.sort.column = col;
+              state.sort.direction = 'asc';
+            }
+            updateTable();
+          });
+        });
+
+        const from = sorted.length ? startIndex + 1 : 0;
+        const to = Math.min(startIndex + state.pageSize, sorted.length);
+        refs.pageInfo.textContent = `Exibindo ${from.toLocaleString('pt-BR')}–${to.toLocaleString('pt-BR')} de ${sorted.length.toLocaleString('pt-BR')}`;
+
+        refs.prevPage.disabled = state.page <= 1;
+        refs.nextPage.disabled = state.page >= totalPages;
+
+        renderPageButtons(totalPages);
+      }
+
+      function renderPageButtons(totalPages) {
+        const pages = [];
+        const current = state.page;
+
+        if (totalPages <= 5) {
+          for (let i = 1; i <= totalPages; i++) pages.push(i);
+        } else {
+          pages.push(1);
+          if (current > 3) pages.push('...');
+          for (let i = Math.max(2, current - 1); i <= Math.min(totalPages - 1, current + 1); i++) pages.push(i);
+          if (current < totalPages - 2) pages.push('...');
+          pages.push(totalPages);
+        }
+
+        refs.pageButtons.innerHTML = pages.map(page =>
+          page === '...'
+            ? '<span class="px-1.5 py-1.5 text-xs text-slate-400">…</span>'
+            : `<button data-page="${page}" class="min-w-8 rounded-lg px-2.5 py-1.5 text-xs font-semibold ${
+                page === current
+                  ? 'bg-blue-600 text-white'
+                  : 'border border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800'
+              }">${page}</button>`
+        ).join('');
+
+        refs.pageButtons.querySelectorAll('[data-page]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            state.page = Number(btn.dataset.page);
+            updateTable();
+          });
+        });
+      }
+
+      function resetFilters() {
+        refs.globalSearch.value = '';
+        refs.dateStart.value = '';
+        refs.dateEnd.value = '';
+        refs.numericMin.value = '';
+        refs.numericMax.value = '';
+        state.search = '';
+        state.page = 1;
+        Object.values(state.categorySelections).forEach(set => set.clear());
+        refs.categoryFilters.querySelectorAll('input[type="checkbox"]').forEach(input => input.checked = false);
+        applyFilters();
+        showToast('Filtros removidos.', 'info');
+      }
+
+      function exportExcel() {
+        if (!state.filteredData.length) {
+          showToast('Não há dados para exportar.', 'error');
+          return;
+        }
+
+        const exportRows = state.filteredData.map(row => {
+          const out = {};
+          state.columns.forEach(col => {
+            const type = state.columnTypes[col];
+            const value = row[col];
+            out[col] = type === 'date' ? formatDate(value) : value;
+          });
+          return out;
+        });
+
+        const worksheet = XLSX.utils.json_to_sheet(exportRows);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Dados Filtrados');
+
+        const widths = state.columns.map(col => ({
+          wch: Math.min(35, Math.max(12, col.length + 2))
+        }));
+        worksheet['!cols'] = widths;
+        worksheet['!autofilter'] = { ref: worksheet['!ref'] };
+
+        XLSX.writeFile(workbook, `${safeFileName(state.fileName)}_filtrado.xlsx`);
+        showToast('Excel exportado com sucesso.', 'success');
+      }
+
+      async function exportPDF() {
+        if (!state.filteredData.length) {
+          showToast('Não há dados para exportar.', 'error');
+          return;
+        }
+
+        const button = el('exportPdfBtn');
+        const original = button.innerHTML;
+        button.disabled = true;
+        button.textContent = 'Gerando...';
+
+        try {
+          const target = el('dashboardCapture');
+          const canvas = await html2canvas(target, {
+            scale: 1.5,
+            useCORS: true,
+            backgroundColor: document.documentElement.classList.contains('dark') ? '#020617' : '#f8fafc',
+            windowWidth: Math.max(target.scrollWidth, 1200)
+          });
+
+          const imgData = canvas.toDataURL('image/jpeg', .92);
+          const { jsPDF } = window.jspdf;
+          const pdf = new jsPDF({
+            orientation: 'landscape',
+            unit: 'mm',
+            format: 'a4',
+            compress: true
+          });
+
+          const pageWidth = pdf.internal.pageSize.getWidth();
+          const pageHeight = pdf.internal.pageSize.getHeight();
+          const margin = 8;
+          const imgWidth = pageWidth - margin * 2;
+          const imgHeight = canvas.height * imgWidth / canvas.width;
+          const usableHeight = pageHeight - margin * 2;
+
+          let heightLeft = imgHeight;
+          let position = margin;
+
+          pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight, undefined, 'FAST');
+          heightLeft -= usableHeight;
+
+          while (heightLeft > 0) {
+            pdf.addPage();
+            position = margin - (imgHeight - heightLeft);
+            pdf.addImage(imgData, 'JPEG', margin, position, imgWidth, imgHeight, undefined, 'FAST');
+            heightLeft -= usableHeight;
+          }
+
+          pdf.save(`${safeFileName(state.fileName)}_dashboard.pdf`);
+          showToast('PDF exportado com sucesso.', 'success');
+        } catch (error) {
+          console.error(error);
+          showToast('Não foi possível gerar o PDF.', 'error');
+        } finally {
+          button.disabled = false;
+          button.innerHTML = original;
+        }
+      }
+
+      function openMobileFilters() {
+        refs.filterPanel.classList.remove('hidden');
+        refs.filterPanel.classList.add('fixed', 'inset-y-0', 'left-0', 'z-[60]', 'w-[min(88vw,340px)]', 'overflow-auto', 'bg-white', 'p-4', 'dark:bg-slate-950');
+        refs.filterPanel.firstElementChild.classList.remove('sticky', 'top-20');
+        refs.mobileOverlay.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+      }
+
+      function closeMobileFilters() {
+        if (window.innerWidth >= 1280) return;
+        refs.filterPanel.classList.add('hidden');
+        refs.filterPanel.classList.remove('fixed', 'inset-y-0', 'left-0', 'z-[60]', 'w-[min(88vw,340px)]', 'overflow-auto', 'bg-white', 'p-4', 'dark:bg-slate-950');
+        refs.filterPanel.firstElementChild.classList.add('sticky', 'top-20');
+        refs.mobileOverlay.classList.add('hidden');
+        document.body.style.overflow = '';
+      }
+
+      function handleResize() {
+        if (window.innerWidth >= 1280) {
+          refs.filterPanel.className = 'no-print hidden xl:block';
+          refs.filterPanel.firstElementChild.classList.add('sticky', 'top-20');
+          refs.mobileOverlay.classList.add('hidden');
+          document.body.style.overflow = '';
+        }
+      }
+
+      function bindEvents() {
+        refs.fileInput.addEventListener('change', event => readFile(event.target.files[0]));
+        refs.openFileBtn.addEventListener('click', () => refs.fileInput.click());
+
+        ['dragenter', 'dragover'].forEach(type => {
+          refs.dropZone.addEventListener(type, event => {
+            event.preventDefault();
+            refs.dropZone.classList.add('drop-active');
+          });
+        });
+
+        ['dragleave', 'drop'].forEach(type => {
+          refs.dropZone.addEventListener(type, event => {
+            event.preventDefault();
+            refs.dropZone.classList.remove('drop-active');
+          });
+        });
+
+        refs.dropZone.addEventListener('drop', event => readFile(event.dataTransfer.files[0]));
+
+        el('themeToggle').addEventListener('click', () => {
+          const dark = document.documentElement.classList.contains('dark');
+          setTheme(dark ? 'light' : 'dark');
+        });
+
+        refs.sheetSelector.addEventListener('change', event => loadSheet(event.target.value));
+
+        refs.metricSelector.addEventListener('change', event => {
+          state.selectedMetric = event.target.value;
+          state.page = 1;
+          refs.numericMin.value = '';
+          refs.numericMax.value = '';
+          initializeFilterBounds();
+          applyFilters();
+        });
+
+        refs.dimensionSelector.addEventListener('change', event => {
+          state.selectedDimension = event.target.value;
+          state.page = 1;
+          updateDashboard();
+        });
+
+        refs.globalSearch.addEventListener('input', debounce(() => {
+          state.page = 1;
+          applyFilters();
+        }, 180));
+
+        [refs.dateStart, refs.dateEnd, refs.numericMin, refs.numericMax].forEach(input => {
+          input.addEventListener('input', debounce(() => {
+            state.page = 1;
+            applyFilters();
+          }, 200));
+        });
+
+        el('clearCategoryFilters').addEventListener('click', () => {
+          Object.values(state.categorySelections).forEach(set => set.clear());
+          refs.categoryFilters.querySelectorAll('input[type="checkbox"]').forEach(input => input.checked = false);
+          state.page = 1;
+          applyFilters();
+        });
+
+        el('resetBtn').addEventListener('click', resetFilters);
+        el('exportExcelBtn').addEventListener('click', exportExcel);
+        el('exportPdfBtn').addEventListener('click', exportPDF);
+
+        refs.pageSize.addEventListener('change', event => {
+          state.pageSize = Number(event.target.value);
+          state.page = 1;
+          updateTable();
+        });
+
+        refs.prevPage.addEventListener('click', () => {
+          if (state.page > 1) {
+            state.page--;
+            updateTable();
+          }
+        });
+
+        refs.nextPage.addEventListener('click', () => {
+          const totalPages = Math.max(1, Math.ceil(state.filteredData.length / state.pageSize));
+          if (state.page < totalPages) {
+            state.page++;
+            updateTable();
+          }
+        });
+
+        refs.mobileFilterBtn.addEventListener('click', openMobileFilters);
+        refs.closeMobileFilters.addEventListener('click', closeMobileFilters);
+        refs.mobileOverlay.addEventListener('click', closeMobileFilters);
+        window.addEventListener('resize', debounce(handleResize, 120));
+      }
+
+      function initialize() {
+        const savedTheme = localStorage.getItem('insightbi-theme');
+        const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+        setTheme(savedTheme || (prefersDark ? 'dark' : 'light'));
+        Chart.defaults.font.family = 'Inter, ui-sans-serif, system-ui, sans-serif';
+        bindEvents();
+      }
+
+      initialize();
+    })();
+  </script>
+</body>
+</html>
